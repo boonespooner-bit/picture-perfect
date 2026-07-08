@@ -106,8 +106,28 @@ async function processPhoto(set, photo) {
 
     updatePhoto(set.id, photo.id, { status: "done", peoplePath, backgroundPath });
   } catch (err) {
-    updatePhoto(set.id, photo.id, { status: "error", error: String(err.message || err) });
+    const message = friendlyGeminiError(err);
+    console.error(`Processing failed for photo ${photo.id}:`, err);
+    updatePhoto(set.id, photo.id, { status: "error", error: message });
   }
+}
+
+// Translate raw Gemini API errors into something actionable for the user.
+function friendlyGeminiError(err) {
+  const raw = String(err?.message || err);
+  if (/FAILED_PRECONDITION|billing/i.test(raw)) {
+    return "Gemini image generation requires billing to be enabled on your Google Cloud project (the free tier no longer includes image models). Enable billing at console.cloud.google.com, then retry.";
+  }
+  if (/RESOURCE_EXHAUSTED|quota|429/i.test(raw)) {
+    return "Gemini quota/rate limit hit. If you're on the free tier, enable billing — image generation has no free quota. Otherwise wait a minute and retry.";
+  }
+  if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED/i.test(raw)) {
+    return "The GEMINI_API_KEY on the server is invalid or lacks access. Re-check the key in Render's environment settings.";
+  }
+  if (/not found|NOT_FOUND/i.test(raw)) {
+    return `The model "${process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image"}" was not found for this API key. Try setting GEMINI_IMAGE_MODEL to a model your key can access.`;
+  }
+  return raw.slice(0, 300);
 }
 
 app.post("/api/sets/:id/process", async (req, res) => {

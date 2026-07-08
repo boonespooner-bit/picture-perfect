@@ -203,17 +203,25 @@ function render() {
   const uploadGrid = $("#upload-grid");
   uploadGrid.innerHTML = "";
   for (const photo of set.photos) {
-    uploadGrid.appendChild(card(`/files/${photo.uploadPath}`, badgeFor(photo)));
+    const c = card(`/files/${photo.uploadPath}`, badgeFor(photo));
+    if (photo.status === "error" && photo.error) {
+      const msg = document.createElement("div");
+      msg.className = "card-error";
+      msg.textContent = photo.error;
+      c.appendChild(msg);
+    }
+    uploadGrid.appendChild(c);
   }
   $("#process-btn").hidden = !set.photos.length;
   const processing = set.status === "processing";
   $("#process-btn").disabled = processing;
   const done = set.photos.filter((p) => p.status === "done").length;
   const failed = set.photos.filter((p) => p.status === "error").length;
+  const firstError = set.photos.find((p) => p.status === "error")?.error;
   $("#process-status").textContent = processing
     ? `Processing… ${done}/${set.photos.length} photos complete`
     : failed
-      ? `${done} succeeded, ${failed} failed — you can retry processing`
+      ? `${done} succeeded, ${failed} failed — ${firstError ? firstError + " — " : ""}you can retry processing`
       : "";
 
   // Pick grids
