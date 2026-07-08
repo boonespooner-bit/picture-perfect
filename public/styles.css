@@ -104,6 +104,9 @@ button.primary {
   transition: border-color 0.15s;
 }
 #dropzone.dragover { border-color: var(--accent-2); color: var(--text); }
+#dropzone .or { margin: 0.75rem 0; font-size: 0.8rem; opacity: 0.7; }
+#google-status { margin: 0.5rem 0 0; }
+#google-status a { color: var(--accent-2); }
 
 .grid {
   display: grid;

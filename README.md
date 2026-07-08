@@ -44,7 +44,24 @@ npm start               # http://localhost:3000
 3. Put it in `.env` locally, and in Render's dashboard for production (below).
 4. Billing: the free tier includes some image generations; for real usage enable billing on the Google Cloud project. `gemini-2.5-flash-image` output costs ≈ $0.039/image. You can switch models with `GEMINI_IMAGE_MODEL` (e.g. `gemini-3-pro-image-preview` for higher quality).
 
-## 3. Deploy on Render
+## 3. Enable Google Photos import (optional)
+
+The upload screen has an **"Add from Google Photos"** button so users can pick photos straight from their library instead of downloading/re-uploading. It uses Google's [Photos Picker API](https://developers.google.com/photos/picker/guides/get-started-picker) (the old full-library API was shut down for third-party apps in 2025): the user picks photos in Google's own UI, and the app imports only what they picked.
+
+Setup in [Google Cloud Console](https://console.cloud.google.com):
+
+1. Create (or reuse) a project → **APIs & Services → Library** → enable **Google Photos Picker API**.
+2. **APIs & Services → OAuth consent screen**: configure it (External), add yourself as a test user while in testing mode.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID** → type **Web application**. Add authorized redirect URIs:
+   - `http://localhost:3000/auth/google/callback` (local dev)
+   - `https://YOUR-APP.onrender.com/auth/google/callback` (production)
+4. Copy the client ID and secret into `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (in `.env` locally, in Render's env vars for production).
+
+Without these vars the app still works — the button just explains it isn't configured.
+
+Note: Google tokens are held in server memory keyed by a browser cookie, so users re-connect after a server restart. Move tokens to a database if that becomes annoying.
+
+## 4. Deploy on Render
 
 **Option A — Blueprint (recommended):** `render.yaml` at the repo root does the setup for you. Go to Render → **New + → Blueprint**, pick this repo, and Render creates the web service and persistent disk automatically. It will prompt you for `GEMINI_API_KEY`.
 
@@ -62,6 +79,10 @@ npm start               # http://localhost:3000
 | `POST /api/sets` `{name}` | Create a set |
 | `GET /api/sets` / `GET /api/sets/:id` | List sets / set detail (poll during processing) |
 | `POST /api/sets/:id/photos` (multipart `photos[]`) | Upload up to 10 images per set |
+| `GET /auth/google` → `GET /auth/google/callback` | Connect a Google account (OAuth) |
+| `POST /api/google/picker-session` | Start a Google Photos picking session (`pickerUri`) |
+| `GET /api/google/picker-session/:sessionId` | Poll whether the user finished picking |
+| `POST /api/sets/:id/import-google` `{sessionId}` | Import the picked photos into a set |
 | `POST /api/sets/:id/process` | Kick off AI separation for all photos (async) |
 | `POST /api/sets/:id/combine` `{peoplePhotoId, backgroundPhotoId}` | Composite the chosen pair |
 | `GET /files/*` | Serve uploaded/processed images |

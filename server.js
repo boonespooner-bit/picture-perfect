@@ -16,12 +16,14 @@ import {
   addComposite,
 } from "./lib/store.js";
 import { extractPeople, extractBackground, composite } from "./lib/gemini.js";
+import * as gphotos from "./lib/googlePhotos.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MAX_PHOTOS_PER_SET = 10;
 
+app.set("trust proxy", true); // Render terminates TLS; trust X-Forwarded-Proto
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/files", express.static(DATA_DIR));
@@ -162,6 +164,160 @@ app.post("/api/sets/:id/combine", async (req, res) => {
     res.status(201).json(record);
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ---- Google Photos (Picker API) ----
+//
+// Browser cookie (pp_sid) -> in-memory token store. Tokens are lost on server
+// restart, which is fine: the user just reconnects. Move to a DB/session store
+// if you need durability.
+
+const googleTokens = new Map(); // sid -> { accessToken, refreshToken, expiresAt }
+
+function getSid(req, res) {
+  const cookies = Object.fromEntries(
+    (req.headers.cookie || "").split(";").map((c) => c.trim().split("=").map(decodeURIComponent))
+  );
+  let sid = cookies.pp_sid;
+  if (!sid) {
+    sid = crypto.randomUUID();
+    res.setHeader("Set-Cookie", `pp_sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+  }
+  return sid;
+}
+
+function redirectUri(req) {
+  return process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/auth/google/callback`;
+}
+
+/** Valid access token for this browser, refreshing if needed; null if not connected. */
+async function googleAccessToken(sid) {
+  const tokens = googleTokens.get(sid);
+  if (!tokens) return null;
+  if (Date.now() < tokens.expiresAt) return tokens.accessToken;
+  if (!tokens.refreshToken) {
+    googleTokens.delete(sid);
+    return null;
+  }
+  try {
+    const refreshed = await gphotos.refreshAccessToken(tokens.refreshToken);
+    googleTokens.set(sid, refreshed);
+    return refreshed.accessToken;
+  } catch {
+    googleTokens.delete(sid);
+    return null;
+  }
+}
+
+app.get("/auth/google", (req, res) => {
+  if (!gphotos.isConfigured()) {
+    return res.status(500).send("Google Photos is not configured on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).");
+  }
+  const sid = getSid(req, res);
+  res.redirect(gphotos.authUrl(redirectUri(req), sid));
+});
+
+app.get("/auth/google/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code) return res.redirect("/?google=denied");
+  try {
+    const tokens = await gphotos.exchangeCode(code, redirectUri(req));
+    googleTokens.set(state, tokens); // state carries the sid we sent
+    // Make sure the browser keeps the same sid the tokens are stored under.
+    res.setHeader("Set-Cookie", `pp_sid=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+    res.redirect("/?google=connected");
+  } catch (err) {
+    console.error("Google OAuth callback failed:", err.message);
+    res.redirect("/?google=error");
+  }
+});
+
+app.get("/api/google/status", async (req, res) => {
+  const sid = getSid(req, res);
+  res.json({
+    configured: gphotos.isConfigured(),
+    connected: Boolean(await googleAccessToken(sid)),
+  });
+});
+
+app.post("/api/google/picker-session", async (req, res) => {
+  const sid = getSid(req, res);
+  const token = await googleAccessToken(sid);
+  if (!token) return res.status(401).json({ error: "Not connected to Google Photos" });
+  try {
+    const session = await gphotos.createPickerSession(token);
+    res.status(201).json({
+      sessionId: session.id,
+      pickerUri: session.pickerUri,
+      pollIntervalMs: Math.max(Number(session.pollingConfig?.pollInterval?.replace("s", "")) * 1000 || 2000, 1500),
+    });
+  } catch (err) {
+    res.status(502).json({ error: String(err.message || err) });
+  }
+});
+
+app.get("/api/google/picker-session/:sessionId", async (req, res) => {
+  const sid = getSid(req, res);
+  const token = await googleAccessToken(sid);
+  if (!token) return res.status(401).json({ error: "Not connected to Google Photos" });
+  try {
+    const session = await gphotos.getPickerSession(token, req.params.sessionId);
+    res.json({ mediaItemsSet: Boolean(session.mediaItemsSet) });
+  } catch (err) {
+    res.status(502).json({ error: String(err.message || err) });
+  }
+});
+
+app.post("/api/sets/:id/import-google", async (req, res) => {
+  const set = getSet(req.params.id);
+  if (!set) return res.status(404).json({ error: "Set not found" });
+  const sid = getSid(req, res);
+  const token = await googleAccessToken(sid);
+  if (!token) return res.status(401).json({ error: "Not connected to Google Photos" });
+
+  const { sessionId } = req.body || {};
+  if (!sessionId) return res.status(400).json({ error: "sessionId required" });
+
+  try {
+    const items = await gphotos.listPickedItems(token, sessionId);
+    const photos = items.filter((i) => (i.type || "").toUpperCase() !== "VIDEO");
+    const room = MAX_PHOTOS_PER_SET - set.photos.length;
+    const toImport = photos.slice(0, Math.max(room, 0));
+    if (!toImport.length) {
+      return res.status(400).json({
+        error: room <= 0 ? `A set holds at most ${MAX_PHOTOS_PER_SET} photos` : "No photos were selected",
+      });
+    }
+
+    let imported = 0;
+    for (const item of toImport) {
+      const file = item.mediaFile || item; // field name per Picker API; tolerate both shapes
+      const baseUrl = file.baseUrl;
+      if (!baseUrl) continue;
+      const buffer = await gphotos.downloadMediaItem(token, baseUrl);
+      const mimeType = file.mimeType || "image/jpeg";
+      const ext = mimeType.includes("png") ? ".png" : mimeType.includes("webp") ? ".webp" : ".jpg";
+      const filename = `${crypto.randomUUID()}${ext}`;
+      fs.writeFileSync(path.join(DATA_DIR, "uploads", filename), buffer);
+      addPhoto(set.id, {
+        id: crypto.randomUUID(),
+        originalName: file.filename || "google-photos-import",
+        uploadPath: `uploads/${filename}`,
+        mimeType,
+        status: "uploaded",
+        peoplePath: null,
+        backgroundPath: null,
+        error: null,
+        source: "google-photos",
+      });
+      imported++;
+    }
+
+    gphotos.deletePickerSession(token, sessionId); // best-effort cleanup
+    res.status(201).json({ imported, skipped: photos.length - imported, set: getSet(set.id) });
+  } catch (err) {
+    res.status(502).json({ error: String(err.message || err) });
   }
 });
 

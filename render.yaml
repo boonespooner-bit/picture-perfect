@@ -12,6 +12,10 @@ services:
     envVars:
       - key: GEMINI_API_KEY
         sync: false # set the value in the Render dashboard, never in git
+      - key: GOOGLE_CLIENT_ID
+        sync: false # optional: enables "Add from Google Photos"
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false # optional: enables "Add from Google Photos"
       - key: GEMINI_IMAGE_MODEL
         value: gemini-2.5-flash-image
       - key: DATA_DIR

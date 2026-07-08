@@ -66,6 +66,75 @@ fileInput.onchange = () => uploadFiles(fileInput.files);
   })
 );
 
+// ---------- Google Photos ----------
+$("#google-photos-btn").onclick = async () => {
+  if (!state.currentSet) return;
+  const status = $("#google-status");
+  const btn = $("#google-photos-btn");
+  try {
+    const { configured, connected } = await api("/api/google/status");
+    if (!configured) {
+      status.textContent = "⚠ Google Photos isn't configured on this server yet (see README).";
+      return;
+    }
+    if (!connected) {
+      window.location.href = "/auth/google"; // OAuth round-trip, comes back here
+      return;
+    }
+
+    btn.disabled = true;
+    status.textContent = "Opening Google Photos picker…";
+    const { sessionId, pickerUri, pollIntervalMs } = await api("/api/google/picker-session", { method: "POST" });
+    const pickerWindow = window.open(pickerUri, "_blank");
+    if (!pickerWindow) {
+      status.innerHTML = `Pop-up blocked — <a href="${pickerUri}" target="_blank" rel="noopener">open the picker</a>, then come back.`;
+    } else {
+      status.textContent = "Pick your photos in the Google Photos tab — I'll import them when you're done.";
+    }
+
+    // Poll until the user finishes picking (mediaItemsSet becomes true)
+    await new Promise((resolve, reject) => {
+      const timer = setInterval(async () => {
+        try {
+          const s = await api(`/api/google/picker-session/${sessionId}`);
+          if (s.mediaItemsSet) {
+            clearInterval(timer);
+            resolve();
+          }
+        } catch (err) {
+          clearInterval(timer);
+          reject(err);
+        }
+      }, pollIntervalMs || 2000);
+    });
+
+    status.textContent = "Importing selected photos…";
+    const result = await api(`/api/sets/${state.currentSet.id}/import-google`, {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    });
+    state.currentSet = result.set;
+    status.textContent = `✓ Imported ${result.imported} photo${result.imported === 1 ? "" : "s"}` +
+      (result.skipped ? ` (${result.skipped} skipped — set is full)` : "");
+  } catch (err) {
+    status.textContent = `⚠ ${err.message}`;
+  }
+  btn.disabled = false;
+  render();
+};
+
+// After the OAuth redirect lands back here, show the result once.
+{
+  const params = new URLSearchParams(location.search);
+  const g = params.get("google");
+  if (g) {
+    history.replaceState({}, "", "/");
+    if (g === "connected") $("#google-status").textContent = "✓ Google Photos connected — select a set, then click the button again to pick photos.";
+    if (g === "denied") $("#google-status").textContent = "Google Photos access was denied.";
+    if (g === "error") $("#google-status").textContent = "⚠ Connecting to Google Photos failed — try again.";
+  }
+}
+
 async function uploadFiles(files) {
   if (!state.currentSet || !files.length) return;
   const form = new FormData();
