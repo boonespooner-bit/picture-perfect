@@ -52,6 +52,14 @@ app.get("/api/sets", (req, res) => {
   res.json(listSets());
 });
 
+app.patch("/api/sets/:id", (req, res) => {
+  const set = getSet(req.params.id);
+  if (!set) return res.status(404).json({ error: "Set not found" });
+  const name = req.body?.name?.trim();
+  if (!name) return res.status(400).json({ error: "Name cannot be empty" });
+  res.json(updateSet(set.id, { name }));
+});
+
 app.get("/api/sets/:id", (req, res) => {
   const set = getSet(req.params.id);
   if (!set) return res.status(404).json({ error: "Set not found" });

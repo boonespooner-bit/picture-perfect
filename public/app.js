@@ -27,10 +27,33 @@ async function refreshSets() {
   for (const set of sets) {
     const li = document.createElement("li");
     li.className = state.currentSet?.id === set.id ? "active" : "";
-    li.innerHTML = `<span>${escapeHtml(set.name)}</span>
-      <span class="meta">${set.photos.length}/10 photos · ${set.status}</span>`;
-    li.onclick = () => selectSet(set.id);
+    li.innerHTML = `<span class="set-name">${escapeHtml(set.name)}</span>
+      <span class="meta">${set.photos.length}/10 photos · ${set.status}</span>
+      <button type="button" class="rename-btn" title="Rename set">✏️</button>`;
+    li.querySelector(".set-name").onclick = () => selectSet(set.id);
+    li.querySelector(".meta").onclick = () => selectSet(set.id);
+    li.querySelector(".rename-btn").onclick = (e) => {
+      e.stopPropagation();
+      renameSet(set);
+    };
     list.appendChild(li);
+  }
+}
+
+async function renameSet(set) {
+  const name = prompt("Rename set (e.g. the photo theme):", set.name);
+  if (name === null) return; // cancelled
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === set.name) return;
+  try {
+    const updated = await api(`/api/sets/${set.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: trimmed }),
+    });
+    if (state.currentSet?.id === set.id) state.currentSet = updated;
+    render();
+  } catch (err) {
+    alert(err.message);
   }
 }
 
