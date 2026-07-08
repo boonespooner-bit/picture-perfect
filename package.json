@@ -1,0 +1,21 @@
+{
+  "name": "picture-perfect",
+  "version": "0.1.0",
+  "description": "Upload sets of photos, use AI to separate people from backgrounds, and combine the best of each.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/genai": "^1.9.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.33.5"
+  }
+}

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Picture Perfect</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>📸 Picture Perfect</h1>
+    <p>Upload a set of photos. AI separates the people from the backgrounds — then combine the best of each.</p>
+  </header>
+
+  <main>
+    <!-- Step 1: sets -->
+    <section id="sets-section">
+      <div class="section-head">
+        <h2>1 · Your sets</h2>
+        <form id="new-set-form">
+          <input type="text" id="set-name" placeholder="Set name (e.g. Beach day)" />
+          <button type="submit">+ New set</button>
+        </form>
+      </div>
+      <ul id="set-list"></ul>
+    </section>
+
+    <!-- Step 2: upload -->
+    <section id="upload-section" hidden>
+      <h2>2 · Upload photos <span class="hint">(up to 10 per set)</span></h2>
+      <div id="dropzone">
+        <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" multiple hidden />
+        <p>Drag &amp; drop photos here, or <button id="browse-btn" type="button">browse</button></p>
+      </div>
+      <div id="upload-grid" class="grid"></div>
+      <button id="process-btn" class="primary" hidden>✨ Separate people from backgrounds</button>
+      <p id="process-status" class="status"></p>
+    </section>
+
+    <!-- Step 3: pick -->
+    <section id="pick-section" hidden>
+      <h2>3 · Pick your favorites</h2>
+      <div class="pick-columns">
+        <div>
+          <h3>Which people shot? <span class="hint">tap to select</span></h3>
+          <div id="people-grid" class="grid selectable"></div>
+        </div>
+        <div>
+          <h3>Which background?</h3>
+          <div id="background-grid" class="grid selectable"></div>
+        </div>
+      </div>
+      <button id="combine-btn" class="primary" disabled>🪄 Combine selection</button>
+    </section>
+
+    <!-- Step 4: result -->
+    <section id="result-section" hidden>
+      <h2>4 · Your picture-perfect shot</h2>
+      <div id="composite-list"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

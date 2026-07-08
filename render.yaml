@@ -1,0 +1,22 @@
+# Render Blueprint: in the Render dashboard choose "New +" -> "Blueprint",
+# pick this repo, and Render creates the web service + persistent disk from
+# this file (it prompts for GEMINI_API_KEY on first deploy).
+services:
+  - type: web
+    name: picture-perfect
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false # set the value in the Render dashboard, never in git
+      - key: GEMINI_IMAGE_MODEL
+        value: gemini-2.5-flash-image
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: picture-perfect-data
+      mountPath: /var/data
+      sizeGB: 1
