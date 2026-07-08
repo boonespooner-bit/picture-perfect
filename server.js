@@ -138,6 +138,11 @@ function friendlyGeminiError(err) {
   return raw.slice(0, 300);
 }
 
+// setIds with a pending cancellation. Checked between photos in the
+// sequential processing loop below (not mid-photo — a photo already in
+// flight always finishes atomically to "done" or "error").
+const cancelledSets = new Set();
+
 app.post("/api/sets/:id/process", async (req, res) => {
   const set = getSet(req.params.id);
   if (!set) return res.status(404).json({ error: "Set not found" });
@@ -147,19 +152,37 @@ app.post("/api/sets/:id/process", async (req, res) => {
   }
   if (set.status === "processing") return res.status(409).json({ error: "Already processing" });
 
+  cancelledSets.delete(set.id);
   updateSet(set.id, { status: "processing" });
   res.status(202).json(getSet(set.id)); // respond now; client polls for progress
 
+  // Only photos that aren't "done" get (re)processed — retrying after a
+  // cancel or a partial failure picks up right where it left off.
   const pending = set.photos.filter((p) => p.status !== "done");
   (async () => {
     // One photo at a time to stay under image-model per-minute rate limits.
     // extractPeople + extractBackground already retry with backoff on 429.
     for (const photo of pending) {
+      if (cancelledSets.has(set.id)) break;
       await processPhoto(set, photo);
     }
+    cancelledSets.delete(set.id);
     const anyDone = getSet(set.id).photos.some((p) => p.status === "done");
     updateSet(set.id, { status: anyDone ? "ready" : "error" });
   })();
+});
+
+app.post("/api/sets/:id/cancel", (req, res) => {
+  const set = getSet(req.params.id);
+  if (!set) return res.status(404).json({ error: "Set not found" });
+  if (set.status !== "processing") {
+    return res.status(400).json({ error: "Not currently processing" });
+  }
+  // The running loop notices this before starting the next photo. The photo
+  // it's mid-flight on still finishes normally (finishes to done/error) —
+  // cancelling just stops it from starting another one after that.
+  cancelledSets.add(set.id);
+  res.json({ ok: true, message: "Cancelling — finishing the current photo, then stopping." });
 });
 
 // ---- Combine: chosen people + chosen background ----

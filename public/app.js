@@ -61,6 +61,7 @@ async function selectSet(id) {
   state.currentSet = await api(`/api/sets/${id}`);
   state.selectedPeople = null;
   state.selectedBackground = null;
+  if (state.currentSet.status === "processing") startPolling();
   render();
 }
 
@@ -185,6 +186,18 @@ $("#process-btn").onclick = async () => {
   render();
 };
 
+$("#cancel-btn").onclick = async () => {
+  const btn = $("#cancel-btn");
+  btn.disabled = true;
+  try {
+    await api(`/api/sets/${state.currentSet.id}/cancel`, { method: "POST" });
+    $("#process-status").textContent = "Cancelling — finishing the current photo, then stopping…";
+  } catch (err) {
+    alert(err.message);
+  }
+  btn.disabled = false;
+};
+
 function startPolling() {
   clearInterval(state.pollTimer);
   state.pollTimer = setInterval(async () => {
@@ -238,6 +251,7 @@ function render() {
   $("#process-btn").hidden = !set.photos.length;
   const processing = set.status === "processing";
   $("#process-btn").disabled = processing;
+  $("#cancel-btn").hidden = !processing;
   const done = set.photos.filter((p) => p.status === "done").length;
   const failed = set.photos.filter((p) => p.status === "error").length;
   const firstError = set.photos.find((p) => p.status === "error")?.error;
