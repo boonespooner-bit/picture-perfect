@@ -94,10 +94,10 @@ async function processPhoto(set, photo) {
   try {
     const buffer = fs.readFileSync(path.join(DATA_DIR, photo.uploadPath));
 
-    const [peopleBuffer, backgroundBuffer] = await Promise.all([
-      extractPeople(buffer, photo.mimeType),
-      extractBackground(buffer, photo.mimeType),
-    ]);
+    // Sequential, not parallel: image models have low per-minute limits (IPM),
+    // and firing both calls at once doubles the burst against that ceiling.
+    const peopleBuffer = await extractPeople(buffer, photo.mimeType);
+    const backgroundBuffer = await extractBackground(buffer, photo.mimeType);
 
     const peoplePath = `people/${photo.id}.png`;
     const backgroundPath = `backgrounds/${photo.id}.jpg`;
@@ -119,7 +119,7 @@ function friendlyGeminiError(err) {
     return "Gemini image generation requires billing to be enabled on your Google Cloud project (the free tier no longer includes image models). Enable billing at console.cloud.google.com, then retry.";
   }
   if (/RESOURCE_EXHAUSTED|quota|429/i.test(raw)) {
-    return "Gemini quota/rate limit hit. If you're on the free tier, enable billing — image generation has no free quota. Otherwise wait a minute and retry.";
+    return "Gemini rate limit (429) hit even after retries. On a paid account this usually means the API key's Google Cloud project isn't the one with billing linked, the project is still on the free/low tier, or a just-upgraded project hasn't calibrated yet (can take 24–48h). Check the project's rate limits in AI Studio, then retry.";
   }
   if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED/i.test(raw)) {
     return "The GEMINI_API_KEY on the server is invalid or lacks access. Re-check the key in Render's environment settings.";
@@ -143,10 +143,11 @@ app.post("/api/sets/:id/process", async (req, res) => {
   res.status(202).json(getSet(set.id)); // respond now; client polls for progress
 
   const pending = set.photos.filter((p) => p.status !== "done");
-  const CONCURRENCY = 3;
   (async () => {
-    for (let i = 0; i < pending.length; i += CONCURRENCY) {
-      await Promise.all(pending.slice(i, i + CONCURRENCY).map((p) => processPhoto(set, p)));
+    // One photo at a time to stay under image-model per-minute rate limits.
+    // extractPeople + extractBackground already retry with backoff on 429.
+    for (const photo of pending) {
+      await processPhoto(set, photo);
     }
     const anyDone = getSet(set.id).photos.some((p) => p.status === "done");
     updateSet(set.id, { status: anyDone ? "ready" : "error" });
